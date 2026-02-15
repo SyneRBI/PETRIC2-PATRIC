@@ -1,0 +1,3 @@
+cupy-cuda12x
+array-api-compat
+torch
