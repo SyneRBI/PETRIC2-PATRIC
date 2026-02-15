@@ -46,7 +46,7 @@ def get_divisors(n):
 
 def step_size_rule_1(update: int) -> float:
     if update <= 8:
-        new_step_size = 3.0
+        new_step_size = 2.0
     elif update <= (40):
         new_step_size = 2.0
     elif update <= 60:
@@ -158,7 +158,7 @@ class Submission(Algorithm):
 
         pre_filter = STIR.SeparableGaussianImageFilter()
         pre_filter.set_fwhms(
-            [self._pre_filter_fwhm_mm, self._pre_filter_fwhm_mm, self._pre_filter_fwhm_mm]
+            [pre_filter_fwhm_mm, pre_filter_fwhm_mm, pre_filter_fwhm_mm]
         )
         pre_filter.set_up(self.x)
 
@@ -293,7 +293,7 @@ class Submission(Algorithm):
             x_sm += self._precond_delta_rel * x_sm.max()
 
         precond = (
-            self._fov_mask
+            self._fov_mask * x_sm
             / (
                 self._adjoint_ones
                 + self._precond_hessian_factor * prior_diag_hess * x_sm
