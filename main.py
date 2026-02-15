@@ -32,7 +32,11 @@ from array_api_compat import to_device
 from rdp import RDP
 
 from petric import Dataset
+import torch
+import torch.nn.functional as F
+from scipy.ndimage import correlate
 
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def get_divisors(n):
     """Returns a sorted list of all divisors of a positive integer n."""
@@ -56,6 +60,45 @@ def step_size_rule_1(update: int) -> float:
 
     return new_step_size
 
+
+def convolution_torch(tensor, kernel):
+    """
+    3D cross-correlation of tensor (C, H, W) with kernel (c, h, w).
+    Uses torch.nn.functional.conv3d.
+    """
+    C, H, W = tensor.shape
+    c, h, w = kernel.shape
+
+    input_5d = tensor.unsqueeze(0).unsqueeze(0)     # (1, 1, C, H, W)
+    kernel_5d = kernel.unsqueeze(0).unsqueeze(0)     # (1, 1, c, h, w)
+
+    pad_c = c - 1
+    pad_h = h - 1
+    pad_w = w - 1
+
+    padding = (
+        pad_w // 2, pad_w - pad_w // 2,
+        pad_h // 2, pad_h - pad_h // 2,
+        pad_c // 2, pad_c - pad_c // 2,
+    )
+    input_5d = F.pad(input_5d, padding)
+    output = F.conv3d(input_5d, kernel_5d)
+    return output.squeeze(0).squeeze(0)           # (C, H, W)
+
+def convolution_scipy(tensor_np: np.ndarray, kernel_np: np.ndarray) -> np.ndarray:
+    """
+    3D cross-correlation of tensor (C, H, W) with kernel (c, h, w).
+    Uses scipy.ndimage.correlate (cross-correlation, no flip) with zero-padding.
+    """
+    c, h, w = kernel_np.shape
+
+    origin = (
+        (c - 1) // 2 - c // 2,
+        (h - 1) // 2 - h // 2,
+        (w - 1) // 2 - w // 2,
+    )
+
+    return correlate(tensor_np, kernel_np, mode="constant", cval=0.0, origin=origin)
 
 class MaxIteration(callbacks.Callback):
     """
@@ -91,7 +134,8 @@ class Submission(Algorithm):
         precond_hessian_factor: float = 2.0,
         precond_filter_fwhm_mm: float = 3.0,
         verbose: bool = False,
-        seed: int = 1,
+        seed: int = 42,
+        do_torch_convolution: bool = True,
         **kwargs,
     ):
         """better pre-conditioned SVRG for PETRIC
@@ -132,6 +176,14 @@ class Submission(Algorithm):
             seed for numpy random generator (used to choose subsets), by default 1
         """
 
+
+        self._do_torch_convolution = do_torch_convolution
+
+        if self._do_torch_convolution:
+            self._all_kernels = torch.load("all_kernels.pt").to(device)
+        else:
+            self._all_kernels = torch.load("all_kernels.pt").cpu().numpy()
+
         np.random.seed(seed)
 
         self._verbose = verbose
@@ -144,6 +196,8 @@ class Submission(Algorithm):
         self._num_subsets = num_views_divisors[
             np.argmin(np.abs(num_views_divisors - approx_num_subsets))
         ]
+
+        self._kernel_iterations = min([self._num_subsets, self._all_kernels.shape[0] - 1])
 
         if self._num_subsets not in num_views_divisors:
             raise ValueError(
@@ -333,9 +387,6 @@ class Submission(Algorithm):
             self._update % self._num_subsets == 0
         ) and self.epoch in self._precond_update_epochs
 
-        # update the step size based on the current update number and the current step size
-        self._step_size = self._step_size_update_function(self._update)
-
         if self._verbose:
             print(self._update, self._step_size)
 
@@ -368,9 +419,27 @@ class Submission(Algorithm):
                 + self._summed_subset_gradients
             )
 
-        ### Objective has to be maximized -> "+" for gradient ascent
-        self.x = self.x + self._step_size * self._precond * approximated_gradient
-
+        # update the step size based on the current update number and the current step size
+        if self._update > self._kernel_iterations:
+            self._step_size = self._step_size_update_function(self._update)
+            ### Objective has to be maximized -> "+" for gradient ascent
+            self.x = self.x + self._step_size * self._precond * approximated_gradient
+        else:
+            if self._do_torch_convolution:
+                new_kernel = self._all_kernels[self._update]
+                init_update = self._precond * approximated_gradient
+                init_update_gpu = torch.from_numpy(init_update.asarray()).to(device)
+                print(f"Doing torch conv, they are on device: {init_update_gpu.device}, {new_kernel.device}")
+                update_gpu = convolution_torch(init_update_gpu, new_kernel)
+                init_update.fill(update_gpu.cpu().numpy())
+                self.x = self.x + init_update
+            else:
+                new_kernel = self._all_kernels[self._update]
+                init_update = self._precond * approximated_gradient
+                print(f"Doing scipy conv, they are on device: {init_update.asarray().device}, {new_kernel.device}")
+                update_np = convolution_scipy(init_update.asarray(), new_kernel)
+                init_update.fill(update_np)
+                self.x = self.x + init_update
         # enforce non-negative constraint
         self.x.maximum(0, out=self.x)
 
