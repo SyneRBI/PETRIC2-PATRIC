@@ -302,14 +302,14 @@ def get_data(srcdir=".", outdir=OUTDIR, sirf_verbosity=0, read_sinos=True):
 
 # yapf: disable
 shortnames = {
-    # "GE_D690_NEMA_IQ": "D690_NEMA",
-    # "GE_DMI3_Torso": "DMI3_Torso",
+    #"GE_D690_NEMA_IQ": "D690_NEMA",
+    "GE_DMI3_Torso": "DMI3_Torso",
     # "GE_DMI4_NEMA_IQ": "DMI4_NEMA",
-    # "Mediso_NEMA_IQ": "Mediso_NEMA",
-    # "NeuroLF_Esser_Dataset": "NeuroLF_Esser",
+    "Mediso_NEMA_IQ": "Mediso_NEMA",
+    "NeuroLF_Esser_Dataset": "NeuroLF_Esser",
     "NeuroLF_Hoffman_Dataset": "NeuroLF_Hoffman",
-    # "Siemens_mMR_ACR": "mMR_ACR",
-    # "Siemens_mMR_NEMA_IQ": "mMR_NEMA",
+    "Siemens_mMR_ACR": "mMR_ACR",
+    "Siemens_mMR_NEMA_IQ": "mMR_NEMA",
     # "Siemens_Vision600_Hoffman": "Vision600_Hoffman",
     # "Siemens_Vision600_thorax": "Vision600_thorax",
     # "Siemens_Vision600_ZrNEMAIQ": "Vision600_ZrNEMA"

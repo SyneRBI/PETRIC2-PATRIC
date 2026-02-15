@@ -136,6 +136,7 @@ class Submission(Algorithm):
         verbose: bool = False,
         seed: int = 42,
         do_torch_convolution: bool = True,
+        use_voi_kernels: bool = True,
         **kwargs,
     ):
         """better pre-conditioned SVRG for PETRIC
@@ -180,9 +181,15 @@ class Submission(Algorithm):
         self._do_torch_convolution = do_torch_convolution
 
         if self._do_torch_convolution:
-            self._all_kernels = torch.load("all_kernels.pt").to(device)
+            if use_voi_kernels:
+                self._all_kernels = torch.load("all_kernels_vois.pt").to(device)
+            else:
+                self._all_kernels = torch.load("all_kernels.pt").to(device)
         else:
-            self._all_kernels = torch.load("all_kernels.pt").cpu().numpy()
+            if use_voi_kernels:
+                self._all_kernels = torch.load("all_kernels_vois.pt").cpu().numpy()
+            else:
+                self._all_kernels = torch.load("all_kernels.pt").cpu().numpy()
 
         np.random.seed(seed)
 
@@ -429,14 +436,16 @@ class Submission(Algorithm):
                 new_kernel = self._all_kernels[self._update]
                 init_update = self._precond * approximated_gradient
                 init_update_gpu = torch.from_numpy(init_update.asarray()).to(device)
-                print(f"Doing torch conv, they are on device: {init_update_gpu.device}, {new_kernel.device}")
+                if self._verbose:
+                    print(f"Doing torch conv, they are on device: {init_update_gpu.device}, {new_kernel.device}")
                 update_gpu = convolution_torch(init_update_gpu, new_kernel)
                 init_update.fill(update_gpu.cpu().numpy())
                 self.x = self.x + init_update
             else:
                 new_kernel = self._all_kernels[self._update]
                 init_update = self._precond * approximated_gradient
-                print(f"Doing scipy conv, they are on device: {init_update.asarray().device}, {new_kernel.device}")
+                if self._verbose:
+                    print(f"Doing scipy conv, they are on device: {init_update.asarray().device}, {new_kernel.device}")
                 update_np = convolution_scipy(init_update.asarray(), new_kernel)
                 init_update.fill(update_np)
                 self.x = self.x + init_update

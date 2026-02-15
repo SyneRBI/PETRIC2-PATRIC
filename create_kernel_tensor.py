@@ -25,9 +25,11 @@ def collect_kernels_into_one_pt_file(kernels_directory, output_file):
     torch.save(all_kernels_tensor, output_file)
 
 
-kernels_directory = Path("learned_kernels")
+kernels_directory = Path("learned_kernels_vois")
 
-output_file = "all_kernels.pt"
+output_file = "all_kernels_vois.pt"
 
 collect_kernels_into_one_pt_file(kernels_directory, output_file)
+
+
 
