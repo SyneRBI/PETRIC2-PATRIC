@@ -233,7 +233,7 @@ class Submission(Algorithm):
         self._python_prior.scale = penalization_factor
 
         # small relative number for the preconditioner (to avoid zeros in the preconditioner)
-        self._precond_delta_rel = 0.0  # 1e-6
+        self._precond_delta_rel = 1e-6
 
         self._precond_filter = STIR.SeparableGaussianImageFilter()
         self._precond_filter.set_fwhms(
