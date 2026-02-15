@@ -46,7 +46,7 @@ def get_divisors(n):
 
 def step_size_rule_1(update: int) -> float:
     if update <= 8:
-        new_step_size = 2.0
+        new_step_size = 3.0
     elif update <= (40):
         new_step_size = 2.0
     elif update <= 60:
