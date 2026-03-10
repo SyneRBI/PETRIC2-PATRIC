@@ -1,125 +1,72 @@
-# PETRIC 2: Second PET Rapid Image reconstruction Challenge
+# PETRIC2-PATRIC: Learning Kernels to Modify Updates
 
-[![website](https://img.shields.io/badge/announcement-website-purple?logo=workplace&logoColor=white)](https://www.ccpsynerbi.ac.uk/events/petric2/)
-[![wiki](https://img.shields.io/badge/details-wiki-blue?logo=googledocs&logoColor=white)][wiki]
-[![register](https://img.shields.io/badge/participate-register-green?logo=ticktick&logoColor=white)][register]
-[![leaderboard](https://img.shields.io/badge/rankings-leaderboard-orange?logo=tensorflow&logoColor=white)][leaderboard]
-[![discord](https://img.shields.io/badge/chat-discord-blue?logo=discord&logoColor=white)](https://discord.gg/Ayd72Aa4ry)
+This repository contains algorithms developed by the PATRIC team submitted to
+the [2025/2026 PETRIC2 reconstruction challenge](https://github.com/SyneRBI/PETRIC2/wiki),
+building on the MaGeZ algorithm that won the first [PETRIC challenge](https://www.ccpsynerbi.ac.uk/petric/).
 
-## Participating
+## Authors
 
-The organisers will provide GPU-enabled cloud runners which have access to larger private datasets for evaluation. To gain access, you must [register]. The organisers will then create a private team submission repository for you.
+- Patrick Fahy, University of Bath, United Kingdom
+- Matthias Ehrhardt, University of Bath, United Kingdom
+- Mohammad Golbabaee, University of Bristol, United Kingdom
+- Zeljko Kereta, University College London, United Kingdom
 
-[register]: https://github.com/SyneRBI/PETRIC2/issues/new/choose
+## Method overview
 
-## What's the same?
-As with [the previous challenge (PETRIC1)](https://github.com/SyneRBI/PETRIC), the goal is to solve a maximum a-posteriori (MAP) estimate using a smoothed relative difference prior (RDP), reaching the target image quality as fast as possible.
-We provide PET sinogram phantom data from different scanners and private repository on GitHub with an implementation of some reference algorithms.
-A live leaderboard which is continuously updated to track your progress.
+We start from the MaGeZ preconditioned SVRG algorithm and replace the scalar step size at each iteration with a **learned 3D convolution kernel** applied to the preconditioned gradient. The key idea is that this generalises the scalar step size to a richer spatial operator while keeping the parameter count small (5×5×5 kernels).
 
-## What's new?
-It's more challenging! The PET sinogram data has fewer counts, meaning algorithms will have to cope with more noise. For more information on the new data, see [wiki/data](https://github.com/SyneRBI/PETRIC2/wiki#data).
+### Base algorithm: MaGeZ (preconditioned SVRG)
 
-In addition to the more challenging data, we have improved our reconstruction software. STIR 6.3 was released which has lots of new features including new analytic reconstruction methods, better GPU support and improved support for reading raw data formats. For more information have a look at the [release notes](https://rawcdn.githack.com/UCL/STIR/c4f12cfc23d5cc85636bc7dedf864ec6c170ec71/documentation/release_6.3.htm). On the SIRF side we focused on speed! We improved the acquisition and image algebra to speed up things by a factor of 3 and optimised our Python interface to ensure we provide data views rather than copying things around. Have a look at the [SIRF 3.9 relase notes](https://github.com/SyneRBI/SIRF/blob/1ba1f9f4f56dfe5ebf1cec5c67d1773056102ae6/CHANGES.md) for more information.
+The base update rule is
 
-## Timeline
-- Start of the challenge: 15 November 2025
-- End of the challenge: 15 February 2026
+$$x_{t+1} = \big[ x_t - \alpha_t P_t \tilde{g}_t \big]_+$$
 
-## Awards
-The winners of PETRIC2 will be announced as part of the Symposium on AI & Reconstruction for Biomedical Imaging taking place from 9 – 10 March 2026 in London (https://www.ccpsynerbi.ac.uk/events/airbi/). All participants of PETRIC2 will be invited to submit an abstract at the beginning of December 2025 and will then have the opportunity to present their work at the Symposium. More information on the abstract and possible travel stipends will follow soon.
+where $\tilde{g}_t$ is the SVRG gradient estimate, $P_t$ is a diagonal preconditioner based on the harmonic mean of $x / (A^\top \mathbf{1})$ and the inverse diagonal Hessian of the Relative Difference Prior, and $[\cdot]_+$ enforces non-negativity.
 
-## Layout
+For PETRIC2, we additionally apply a Gaussian pre-filter (FWHM = 6mm) to the OSEM warm-start image before beginning the iteration.
 
-The organisers will import your submitted algorithm from `main.py` and then run & evaluate it.
-Please create this file! See the example `main_*.py` files for inspiration.
+### Our contribution: learned convolution kernels
 
-[SIRF](https://github.com/SyneRBI/SIRF), [CIL](https://github.com/TomographicImaging/CIL), and CUDA are already installed (using [synerbi/sirf](https://github.com/synerbi/SIRF-SuperBuild/pkgs/container/sirf)).
-Additional dependencies may be specified via `apt.txt`, `environment.yml`, and/or `requirements.txt`.
+We replace the scalar step size $\alpha_t$ with a learned 3D convolution kernel $K_t$:
 
-- (required) `main.py`: must define a `class Submission(cil.optimisation.algorithms.Algorithm)` and a (potentially empty) list of `submission_callbacks`, e.g.:
-  + [main_BSREM.py](main_BSREM.py)
-  + [main_ISTA.py](main_ISTA.py)
-  + [main_OSEM.py](main_OSEM.py)
-- `apt.txt`: passed to `apt install`
-- `environment.yml`: passed to `conda install`, e.g.:
+$$\Delta x_t = K_t * (P_t \tilde{g}_t)$$
 
-  ```yml
-  name: winning-submission
-  channels: [conda-forge, nvidia]
-  dependencies:
-  - cupy
-  - cuda-version 12.8.*
-  - pip
-  - pip:
-    - git+https://github.com/MyResearchGroup/prize-winning-algos
-  ```
+Since convolution is linear in the kernel, the training objective is a **linear least-squares** problem that can be solved efficiently using **Conjugate Gradients (CG)** — no backpropagation, unrolling, or automatic differentiation is required. Each kernel is learned in under 100 CG iterations (seconds, not minutes).
 
-- `requirements.txt`: passed to `pip install`, e.g.:
+This approach is based on: Fahy, Golbabaee, Ehrhardt. [*Greedy learning to optimize with convergence guarantees*](https://arxiv.org/abs/2406.00260). arXiv:2406.00260, 2024.
 
-  ```txt
-  cupy-cuda12x
-  git+https://github.com/MyResearchGroup/prize-winning-algos
-  ```
+### Training
 
-> [!TIP]
-> You probably should create either an `environment.yml` or `requirements.txt` file (but not both).
+Kernels were trained on a small subset of the available datasets (5 out of 13). Due to the heterogeneity of PET scanner geometries across datasets, the kernels are trained to be **iteration-dependent but not data-adaptive** — the same kernel $K_t$ is applied to all datasets at iteration $t$, relying on the preconditioned gradient $P_t \tilde{g}_t$ to absorb scanner-specific differences.
 
-You can also find some example notebooks here which should help you with your development:
-- https://github.com/SyneRBI/SIRF-Contribs/blob/master/src/notebooks/BSREM_illustration.ipynb
+Learned kernels are used for the **first epoch only** (when the full gradient is computed). Beyond the first epoch, stochastic subset gradients made the learning signal too noisy — learned kernels converged to approximately zero. After the first epoch, the algorithm switches back to standard MaGeZ with a hand-tuned decreasing step size schedule.
 
-## Organiser Setup
+## Submitted algorithms
 
-The organisers will execute (after installing [nvidia-docker](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) & downloading <https://petric.tomography.stfc.ac.uk/2/data/> to `/path/to/data`):
+### Submission 1: Whole-object kernel loss
 
-```sh
-# 1. git clone & cd to your submission repository
-# 2. mount `.` to container `/workdir`:
-docker run --rm -it --gpus all -p 6006:6006 \
-  -v /path/to/data:/mnt/share/petric:ro \
-  -v .:/workdir -w /workdir ghcr.io/synerbi/sirf:petric2 /bin/bash
-# 1. optionally, conda/pip/apt install environment.yml/requirements.txt/apt.txt
-# 2. run your submission
-python petric.py &
-# 3. optionally, serve logs at <http://localhost:6006>
-tensorboard --bind_all --port 6006 --logdir ./output
-```
+The kernel regression loss is computed over the **whole-object mask**:
 
-> [!NOTE]
-> [The docker image](https://github.com/SyneRBI/PETRIC-backend/blob/main/Dockerfile) includes Python3.12, SIRF, CIL, [MONAI](https://github.com/Project-MONAI/MONAI), Torch, TensorFlow, and [Stochastic-QualityMetrics](https://github.com/TomographicImaging/Hackathon-000-Stochastic-QualityMetrics).
+$$K_t^* = \arg\min_K \sum_{n=1}^{N} \| x_{t,n} - K * (P_{t,n} \tilde{g}_{t,n}) - x_n^\star \|_{M_{\mathrm{obj},n}}^2$$
 
-## FAQ
+### Submission 2: VOI-aware kernel loss
 
-See the [wiki/Home][wiki] and [wiki/FAQ](https://github.com/SyneRBI/PETRIC2/wiki/FAQ) for more info.
+The kernel regression loss uses a **weighted combination** that directly targets the PETRIC2 evaluation metrics. For whole-object and background masks, per-voxel MSE is used (proxy for NRMSE). For each VOI region, the squared error of means is used (proxy for AEM):
 
-> [!TIP]
-> `petric.py` will effectively execute:
->
-> ```python
-> from main import Submission, submission_callbacks  # your submission (`main.py`)
-> from petric import data, metrics  # our data & evaluation
-> assert issubclass(Submission, cil.optimisation.algorithms.Algorithm)
-> Submission(data).run(numpy.inf, callbacks=metrics + submission_callbacks)
-> ```
+$$K_t^* = \arg\min_K \sum_{n=1}^{N} \frac{1}{C_n} \left[ \sum_{j \in \{\mathrm{obj}, \mathrm{bg}\}} \frac{1}{|M_{j,n}|} \sum_{i \in M_{j,n}} (\hat{x}_n^{(i)} - x_n^{\star(i)})^2 + \sum_{k=1}^{K_n} \big(\mathrm{mean}(\hat{x}_n; R_{k,n}) - \mathrm{mean}(x_n^\star; R_{k,n})\big)^2 \right]$$
 
-<!-- br -->
+where $\hat{x}_n = x_{t,n} - K * (P_{t,n} \tilde{g}_{t,n})$.
 
-> [!WARNING]
-> To avoid timing out (currently 10 min runtime, will likely be increased a bit for the final evaluation after submissions close), please disable any debugging/plotting code before submitting!
-> This includes removing any progress/logging from `submission_callbacks` and any debugging from `Submission.__init__`.
+## Full algorithm
 
-- `data` to test/train your `Algorithm`s is available at <https://petric.tomography.stfc.ac.uk/2/data/> and is likely to grow (more info to follow soon)
-  + fewer datasets will be available during the submission phase, but more will be available for the final evaluation after submissions close
-  + please contact us if you'd like to contribute your own public datasets!
-- `metrics` are calculated by `class QualityMetrics` within `petric.py`
-  + this does not contribute to your runtime limit
-  + effectively, only `Submission(data).run(np.inf, callbacks=submission_callbacks)` is timed
-- when using the temporary [leaderboard], it is best to:
-  + change `Horizontal Axis` to `Relative`
-  + untick `Ignore outliers in chart scaling`
-  + see [the wiki](https://github.com/SyneRBI/PETRIC2/wiki#metrics-and-thresholds) for details
+1. **Epoch 1** ($t = 0, \ldots, S-1$): use learned kernels
 
-Any modifications to `petric.py` are ignored.
+$$x_{t+1} = \big[ x_t - K_t^* * (P_t \tilde{g}_t) \big]_+$$
 
-[wiki]: https://github.com/SyneRBI/PETRIC2/wiki
-[leaderboard]: https://petric.tomography.stfc.ac.uk/2/leaderboard/?smoothing=0#timeseries&_smoothingWeight=0
+2. **Epochs ≥ 2**: standard MaGeZ with $\alpha_t = 1.5$ for $t \le 60$, and $\alpha_t = 1$ otherwise
+
+$$x_{t+1} = \big[ x_t - \alpha_t P_t \tilde{g}_t \big]_+$$
+
+## Acknowledgements
+
+We thank the PETRIC2 organisers for a very interesting challenge. This work builds on the [MaGeZ algorithm](https://arxiv.org/abs/2506.04976) by Ehrhardt, Schramm, and Kereta.
